@@ -1,6 +1,4 @@
-
-
-class BBox():
+class BoundingBox():
     def __init__(self, box_string):
         vals = box_string.split()[1:]
         self.x0 = int(vals[0])
@@ -17,26 +15,25 @@ class BBox():
         return self.y1 - self.y0 
 
 class hOCRObject():
-
-    def __init(self):
-        self.box = BBox()
+    def __init__(self, element):
+        self.box = BoundingBox(element['title'])
+        self.text = element.string 
 
     @property
     def width(self):
-        return self.x1 - self.x0 
+        return self.box.width 
 
     @property
     def height(self):
-        return self.y1 - self.y0 
-
+        return self.box.height 
 
 class Word(hOCRObject):
-    pass
-
+    def __init__(self, element):
+        self.box = BoundingBox(element['title'])
     
 class Line(hOCRObject):
-    pass
-
+    def __init__(self, element):
+        self.box = BoundingBox(element['title'])
     
 class Area(hOCRObject):
     pass

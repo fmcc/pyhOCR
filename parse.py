@@ -19,7 +19,7 @@ class BBox():
 
 def parse(text, name):
     text_soup = BS(text)
-    spans = text_soup.find_all('span',{'class':'ocr_word'})
+    spans = text_soup.find_all('span',{'class':'ocr_line'})
     boxes = [BBox(s['title']) for s in spans]
     if not boxes:
         return
