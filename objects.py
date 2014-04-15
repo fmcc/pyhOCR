@@ -117,6 +117,13 @@ class Area(hOCRObject):
         heights = [s.height for s in self.children]
         if heights:
             return sum(heights)/len(heights)
+    
+    @property
+    def line_std_dev(self):
+        """ Return the standard deviation of line heights in an area """
+        heights = [s.height for s in self.children]
+        if heights:
+            return np.std(heights)
 
 class Page(hOCRObject):
     def __init__(self, children):
@@ -159,5 +166,3 @@ class Page(hOCRObject):
     def recalculate_spaces(self):
         self.line_spaces = self._generate_line_spaces()
 
-
-#'ocr_word': Word, 'ocr_line': Line, 'ocr_carea': Area

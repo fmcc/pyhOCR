@@ -1,14 +1,23 @@
 from bs4 import BeautifulSoup as BS
 from .objects import *
-import svgwrite
-from PIL import Image
+from .draw import *
+import numpy as np
 import itertools
 import collections
-import re
 import os
 
+def hOCR_open(hocr_page):
+    hocr_soup = BS(open(hocr_page).read())
+    page = generate_tree(hocr_soup)
+    return page
+    #detect_columns(text_tree)
+    text_tree = reparse_tree(text_tree)
+    produce_svg_file(text_tree, text)
+    
+
+
+
 def generate_tree(text_in):
-    # This is not readable - rewrite. 
     return Page(
         [ Line(line, 
             [ Word(word) 
@@ -16,19 +25,57 @@ def generate_tree(text_in):
             ] ) 
             for line in text_in.find_all( True, { 'class' , 'ocr_line' } ) 
         ] )
-        
+
+def detect_page_type(page):
+    pass
+
+def detect_columns(page):
+    print(len(page.children))
+    parallel = set()
+    not_parallel = set()
+    mid_x_1 = []
+    mid_x_2 = []
+    for line_one, line_two in itertools.combinations(page.children, 2):
+        if line_one.box.vertical_overlap(line_two.box) and not line_one.box.horizontal_overlap(line_two.box):
+            line_one.label = 'GREEK'
+            line_two.label = 'LATIN'
+            parallel.add(line_one)
+            parallel.add(line_two)
+            
+            if line_two.box.x1 < line_one.box.x0:
+                line_one, line_two = line_two, line_one
+            
+
+            mid_x_1.append(min(line_two.box.x0,line_one.box.x1))
+            mid_x_2.append(max(line_two.box.x0,line_one.box.x1))
+        else:
+            line_one.label = ''
+            line_two.label = ''
+            not_parallel.add(line_one)
+            not_parallel.add(line_two)
+    print(len(parallel), len(not_parallel))
+    line_lengths = [line.box.width for line in page.children]
+    
+    x0 = max(mid_x_1) 
+    y0 = min([line.box.y0 for line in page.children]) 
+    y1 = max([line.box.y1 for line in page.children]) 
+    x1 = min(mid_x_2) 
+    page.vertical_gap = ((x0,y0),(x1,y1))
+    #print(max(line_lengths))
+    #print(sum(line_lengths)/len(line_lengths))
+
 def reparse_tree(page):
     
     def merge_parallel_lines(page):
         """ Merge lines that are parallel in a single column layout to a single """ 
         defunct_lines = []
-        for line_pair in itertools.combinations(page.children, 2):
-            if line_pair[0].box.vertical_overlap(line_pair[1].box) and not line_pair[0].box.horizontal_overlap(line_pair[1].box):
+        for line_one, line_two in itertools.combinations(page.children, 2):
+            if line_one.box.vertical_overlap(line_two.box) and not line_one.box.horizontal_overlap(line_two.box):
                 # add the children from one line to another
-                line_pair[0].children.extend(line_pair[1].children)
-                line_pair[0].recalculate_bounding_box()
+                line_one.children.extend(line_two.children)
+                line_one.recalculate_bounding_box()
                 # add second line to those to be removed
-                defunct_lines.append(line_pair[1])
+                defunct_lines.append(line_two)
         for line in defunct_lines:
             page.children.remove(line)
         page.recalculate_spaces()
@@ -100,6 +147,22 @@ def reparse_tree(page):
         
         return Page(page_areas)  
 
+    def group_by_line_heights(areas):
+        """  """
+        sorted_areas = sorted(areas, key=lambda a: a.box.y0)
+        temp_label = 0
+        sorted_areas[0].label = temp_label
+        for i, area in enumerate(sorted_areas):
+            next_area_index = i + 1
+            if not next_area_index >= len(sorted_areas):
+                next_area = sorted_areas[next_area_index]
+                difference = area.avg_line_height - next_area.avg_line_height
+                if difference > 2*area.line_std_dev and difference > 2*next_area.line_std_dev:
+                    temp_label += 1
+                    next_area.label = temp_label
+                else:
+                    next_area.label = temp_label
+
     def label_areas(page):
         """ Attempt to label the areas of text as parts of a page """ 
         first_area = page.children[0]
@@ -120,18 +183,17 @@ def reparse_tree(page):
         # Label the suspected line numbers
         start = page.avg_line_x('START')
         end = page.avg_line_x('END')
-        for area in page.children:
-            if area.label not in ['HEADER','TITLE']:
-                for line in area.children:
-                    for word in line.children:
-                        if word.box.x1 < start or word.box.x0 > end:
-                            word.label = 'LINE_NO'
-        for area in page.children:
+        remaining_areas = [area for area in page.children if area.label not in ['HEADER','TITLE']]
+        group_by_line_heights(remaining_areas)
+        for area in remaining_areas:
+            for line in area.children:
+                for word in line.children:
+                    if word.box.x1 < start or word.box.x0 > end:
+                        word.label = 'LINE_NO'
+
             area_count = collections.Counter()
             for line in area.children:
                 area_count.update([word.label for word in line.children])
-            print(area_count)
-            print(area.avg_line_height)
         return page
 
 
@@ -139,62 +201,7 @@ def reparse_tree(page):
     new_page = merge_parallel_lines(page)
     return label_areas(create_areas(new_page, area_boxes(new_page, section_break_spaces(new_page, 2))))
 
-COLOUR = {
-'HEADER': '#F7977A', #Pastel Red  
-#'': '#F9AD81', #Pastel Red Orange   
-'TITLE': '#FDC68A', #Pastel Yellow Orange
-'LINE_NO': '#FFF79A', #Pastel Yellow
-'APP_CRIT': '#C4DF9B', #Pastel Pea Green
-#'': '#A2D39C', #Pastel Yellow Green
-'FOOTER': '#82CA9D', #Pastel Green
-#'': '#7BCDC8', #Pastel Green Cyan
-'': '#6ECFF6', #Pastel Cyan
-#'': '#7EA7D8', #Pastel Cyan Blue
-'LATIN': '#8493CA', #Pastel Blue
-#'': '#8882BE', #Pastel Blue Violet
-#'': '#A187BE', #Pastel Violet
-#'': '#BC8DBF', #Pastel Violet Magenta
-'GREEK': '#F49AC2', #Pastel Magenta
-#'': '#F6989D' #Pastel Magenta Red
-}
-
-def produce_svg_file(page, original_file_path):
-    """ Create a SVG visualisation of the contents of a hOCR file from the 'Tree' representation """
-    base_path = os.path.join(os.path.dirname(original_file_path), '../')
-    filename = os.path.join(base_path, 'svg',  re.sub('html','svg', os.path.basename(original_file_path)))
-    # There may be nothing on the page
-    if len(page.children) == 0 :
-        svg_drawing = svgwrite.Drawing(filename=filename)
-        return
-    # We open the original jpg to get the size that the image should be.  
-    jpg_name = re.sub('html','jpg', os.path.basename(original_file_path))
-    img = Image.open(os.path.join(base_path, 'original_images', jpg_name))
-    svg_drawing = svgwrite.Drawing(filename=filename, size=img.size)
- 
-    page = reparse_tree(page)
-    for area in page.children:
-        svg_drawing.add(svg_drawing.rect((area.box.x0, area.box.y0), (area.width, area.height), fill=COLOUR[area.label]))
-        for line in area.children:
-            #svg_drawing.add(svg_drawing.rect((line.box.x0, line.box.y0), (line.width, line.height), fill='#FF3399'))
-            for word in line.children:
-                svg_drawing.add(svg_drawing.rect((word.box.x0, word.box.y0), (word.width, word.height), fill=COLOUR[word.label]))
-    
-    #colours = {'Greek': 'red', 'Latin': 'blue', 'Number': 'green'}
-    
-
-    #svg_drawing.add(svg_drawing.line((start, page.box.y0), (start, page.box.y1), stroke='black', stroke_width=10)) 
-    #svg_drawing.add(svg_drawing.line((end, page.box.y0), (end, page.box.y1), stroke='black', stroke_width=10)) 
-
-    svg_drawing.save()
 
 
 
-
-def parse(text):
-    text_soup = BS(open(text).read())
-    text_tree = generate_tree(text_soup)
-
-    produce_svg_file(text_tree, text)
-    #reparse_tree(text_tree)
-    
 
